@@ -8,13 +8,14 @@ The build process ensures the most up-to-date OpenThread firmware for nRF52840 b
 
 - **UART Version**: `ot-cli-ftd-UART.hex`
 - **USB Version**: `ot-cli-ftd-USB.hex`
+- **USB Radio Co-Processo**: `ot-rcp-USB.hex`
 
 Firmware is published as part of [bi-monthly releases](https://github.com/ArthFink/nrf52840-OpenThread/releases), which include precompiled binaries for different use cases supported versions.
 
 ## How to Download the Firmware
 
 1. Go to the [Releases page](https://github.com/ArthFink/nrf52840-OpenThread/releases).
-2. Select the most recent release (or browse previous ones if needed).
+2. Select the most recent release (release 07/2025 known good).
 3. Download the appropriate firmware file for your device and use case from the Assets section.
    - For use with OpenThread Border Router, a Radio Co-Processor (RPC) image is required.
    
