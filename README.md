@@ -63,6 +63,10 @@ Once you have downloaded the firmware, you can flash it onto your nRF52840 devic
 nrfjprog -f nrf52 --chiperase --program ot-cli-ftd-UART.hex --reset
 ```
 
+## Home Assistant 
+
+👉 For Home Assistant setup instructions, check out [homeassisten-setup-otbr.md](./homeassisten-setup-otbr.md).
+
 ## License
 
 This repository and the OpenThread firmware are licensed under the [BSD 3-Clause License](LICENSE).
