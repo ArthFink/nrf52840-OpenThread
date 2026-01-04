@@ -1,0 +1,90 @@
+name: Build Zephyr OpenThread RCP (USB) for nRF52840 dongles
+
+on:
+  push:
+    branches:
+      - main
+      - build-*
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-rcp-usb:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: nrf52840dongle
+            board: nrf52840dongle/nrf52840
+          - id: nrf52840_mdk_usb_dongle
+            board: nrf52840_mdk_usb_dongle/nrf52840
+          - id: raytac_mdbt50q_cx_40_dongle
+            board: raytac_mdbt50q_cx_40_dongle/nrf52840
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build gperf device-tree-compiler \
+            dfu-util git wget xz-utils file \
+            python3-pip python3-venv
+
+      - name: Create west manifest (pinned Zephyr)
+        run: |
+          mkdir -p zephyr-app
+          cat > zephyr-app/west.yml << 'EOF'
+          manifest:
+            version: "0.12"
+            remotes:
+              - name: zephyrproject-rtos
+                url-base: https://github.com/zephyrproject-rtos
+            projects:
+              - name: zephyr
+                remote: zephyrproject-rtos
+                revision: v4.3.0
+                import: true
+            self:
+              path: zephyr-app
+          EOF
+
+      - name: Setup Zephyr (west + Zephyr SDK)
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: zephyr-app
+          toolchains: arm-zephyr-eabi
+          sdk-version: 0.17.4
+
+      - name: Build RCP over USB (${{ matrix.id }})
+        run: |
+          west build -p always \
+            -b "${{ matrix.board }}" \
+            -d "build/${{ matrix.id }}" \
+            zephyr/samples/net/openthread/coprocessor \
+            -- \
+            -DDTC_OVERLAY_FILE=usb.overlay \
+            -DEXTRA_CONF_FILE="overlay-rcp.conf;overlay-usb-nrf-br.conf"
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts/${{ matrix.id }}
+          cp -v build/${{ matrix.id }}/zephyr/zephyr.hex artifacts/${{ matrix.id }}/ot-rcp-USB.hex
+          cp -v build/${{ matrix.id }}/zephyr/zephyr.elf artifacts/${{ matrix.id }}/ot-rcp-USB.elf || true
+          cp -v build/${{ matrix.id }}/zephyr/.config artifacts/${{ matrix.id }}/zephyr.config || true
+          cp -v build/${{ matrix.id }}/zephyr/zephyr.dts artifacts/${{ matrix.id }}/zephyr.dts || true
+
+      - name: Upload artifacts (${{ matrix.id }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: zephyr-ot-rcp-usb-${{ matrix.id }}
+          path: artifacts/${{ matrix.id }}
