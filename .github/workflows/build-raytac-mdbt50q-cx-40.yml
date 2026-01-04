@@ -1,0 +1,152 @@
+name: Build OpenThread for Raytac MDBT50Q-CX-40
+
+on:
+  push:
+    branches:
+      - main
+      - build-raytac
+      - build-raytec
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Zephyr OpenThread samples (Raytac dongle)
+    runs-on: ubuntu-latest
+
+    env:
+      BOARD: raytac_mdbt50q_cx_40_dongle/nrf52840
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Sets up a Zephyr workspace, installs west, and pulls Zephyr + modules.
+      - name: Set up Zephyr workspace
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          # Pinning is optional; leaving this out follows the action default.
+          sdk-version: "0.17.2"
+          toolchains: arm-zephyr-eabi
+
+      # Make sure the toolchain is actually usable in later steps (fixes gcc not found).
+      - name: Put Zephyr SDK toolchain on PATH
+        shell: bash
+        run: |
+          echo "${ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin" >> "${GITHUB_PATH}"
+
+      # Fix the protobuf/nrfutil breakage (optional, but avoids your current crash).
+      - name: Install nrfutil (protobuf pinned)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "protobuf==3.20.*" "nrfutil"
+
+      - name: Create west manifest (repo root)
+        run: |
+          cat > west.yml <<'YML'
+          manifest:
+            remotes:
+              - name: zephyrproject-rtos
+                url-base: https://github.com/zephyrproject-rtos
+            projects:
+              - name: zephyr
+                remote: zephyrproject-rtos
+                revision: v4.2.0
+                import: true
+            self:
+              path: .
+          YML
+
+      - name: West init + update
+        run: |
+          west init -l raytac-zephyr-workspace raytac-zephyr-ws
+          cd raytac-zephyr-ws
+          west update
+          west zephyr-export
+
+      - name: Print tool versions
+        shell: bash
+        run: |
+          west --version
+          cmake --version
+          ninja --version
+          arm-zephyr-eabi-gcc --version | head -n 1
+          nrfutil --version || true
+
+      # IMPORTANT: build from the Zephyr repo root, and use samples/... paths.
+      - name: Build OpenThread shell (UART)  -> ot-cli-ftd-UART
+        working-directory: ${{ env.ZEPHYR_BASE }}
+        shell: bash
+        run: |
+          west build -p always \
+            -b "${BOARD}" \
+            -d "${{ github.workspace }}/build/ot-cli-ftd-UART" \
+            samples/net/openthread/shell -- \
+            -DCONF_FILE="prj.conf"
+
+      # USB console: use Zephyr's snippet that redirects console to CDC-ACM.
+      # (This is the cleanest way to get a USB serial console on many boards.)
+      - name: Build OpenThread shell (USB CDC-ACM console) -> ot-cli-ftd-USB
+        working-directory: ${{ env.ZEPHYR_BASE }}
+        shell: bash
+        run: |
+          west build -p always \
+            -S cdc-acm-console \
+            -b "${BOARD}" \
+            -d "${{ github.workspace }}/build/ot-cli-ftd-USB" \
+            samples/net/openthread/shell -- \
+            -DCONF_FILE="prj.conf"
+
+      # RCP build: Zephyr provides a coprocessor sample and an RCP overlay.
+      # USB transport example uses usb.overlay + overlay-usb-nrf-br.conf.
+      - name: Build OpenThread RCP (USB CDC-ACM UART transport) -> ot-rcp-USB
+        working-directory: ${{ env.ZEPHYR_BASE }}
+        shell: bash
+        run: |
+          west build -p always \
+            -b "${BOARD}" \
+            -d "${{ github.workspace }}/build/ot-rcp-USB" \
+            samples/net/openthread/coprocessor -- \
+            -DCONF_FILE="prj.conf overlay-rcp.conf" \
+            -DDTC_OVERLAY_FILE="usb.overlay" \
+            -DEXTRA_CONF_FILE="overlay-usb-nrf-br.conf"
+
+      - name: Collect artifacts (hex/bin/uf2 if present)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+
+          collect() {
+            local builddir="$1"
+            local name="$2"
+
+            cp "${builddir}/zephyr/zephyr.hex" "out/${name}.hex"
+            cp "${builddir}/zephyr/zephyr.bin" "out/${name}.bin"
+
+            # UF2 is not always produced for every board; copy if it exists.
+            if [ -f "${builddir}/zephyr/zephyr.uf2" ]; then
+              cp "${builddir}/zephyr/zephyr.uf2" "out/${name}.uf2"
+            fi
+          }
+
+          collect "${{ github.workspace }}/build/ot-cli-ftd-UART" "ot-cli-ftd-UART"
+          collect "${{ github.workspace }}/build/ot-cli-ftd-USB"  "ot-cli-ftd-USB"
+          collect "${{ github.workspace }}/build/ot-rcp-USB"      "ot-rcp-USB"
+
+          ls -lah out
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: raytac-mdbt50q-cx-40-openthread
+          path: out/*
+
